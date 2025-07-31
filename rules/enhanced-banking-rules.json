@@ -1,0 +1,463 @@
+{
+  "rules": [
+    {
+      "id": "restricted_country_transaction",
+      "name": "Restricted Country Transaction",
+      "description": "Block transactions to/from sanctioned or restricted countries",
+      "enabled": true,
+      "priority": "critical",
+      "category": "compliance",
+      "conditions": {
+        "or": [
+          {
+            "field": "compliance.fromCountryRisk",
+            "operator": "equals",
+            "value": "restricted"
+          },
+          {
+            "field": "compliance.toCountryRisk", 
+            "operator": "equals",
+            "value": "restricted"
+          },
+          {
+            "field": "compliance.isRestricted",
+            "operator": "equals",
+            "value": true
+          }
+        ]
+      },
+      "actions": [
+        {
+          "type": "reject_transaction",
+          "config": {
+            "reason": "Transaction blocked due to restricted country involvement"
+          }
+        },
+        {
+          "type": "send_notification",
+          "config": {
+            "recipient": "compliance@company.com",
+            "message": "CRITICAL: Restricted country transaction blocked - From: {from.country}, To: {to.country}, Amount: {transaction.amount}",
+            "urgency": "critical"
+          }
+        },
+        {
+          "type": "log_event",
+          "config": {
+            "event": "restricted_country_block",
+            "severity": "critical"
+          }
+        }
+      ]
+    },
+    {
+      "id": "high_risk_country_transaction",
+      "name": "High Risk Country Transaction",
+      "description": "Enhanced monitoring for high-risk country transactions",
+      "enabled": true,
+      "priority": "high",
+      "category": "geo_risk",
+      "conditions": {
+        "and": [
+          {
+            "or": [
+              {
+                "field": "compliance.fromCountryRisk",
+                "operator": "equals",
+                "value": "high"
+              },
+              {
+                "field": "compliance.toCountryRisk",
+                "operator": "equals",
+                "value": "high"
+              }
+            ]
+          },
+          {
+            "field": "transaction.amount",
+            "operator": "greater_than",
+            "value": 2000
+          }
+        ]
+      },
+      "actions": [
+        {
+          "type": "flag_transaction",
+          "config": {
+            "reason": "High-risk country transaction requires enhanced monitoring",
+            "severity": "high"
+          }
+        },
+        {
+          "type": "calculate_score",
+          "config": {
+            "threshold": 70,
+            "factors": [
+              {
+                "field": "transaction.amount",
+                "weight": 1,
+                "ranges": [
+                  { "min": 2000, "max": 10000, "points": 20 },
+                  { "min": 10000, "max": 50000, "points": 40 },
+                  { "min": 50000, "max": 999999999, "points": 60 }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "send_notification",
+          "config": {
+            "recipient": "risk-team@company.com",
+            "message": "High-risk country transaction: {transaction.amount} {transaction.currency} from {from.country} to {to.country}",
+            "urgency": "high"
+          }
+        }
+      ]
+    },
+    {
+      "id": "invalid_banking_details",
+      "name": "Invalid Banking Details",
+      "description": "Flag transactions with invalid banking information",
+      "enabled": true,
+      "priority": "high",
+      "category": "data_validation",
+      "conditions": {
+        "field": "validation.banking.isValid",
+        "operator": "equals",
+        "value": false
+      },
+      "actions": [
+        {
+          "type": "flag_transaction",
+          "config": {
+            "reason": "Transaction contains invalid banking details",
+            "severity": "high"
+          }
+        },
+        {
+          "type": "send_notification",
+          "config": {
+            "recipient": "operations@company.com",
+            "message": "Banking validation failed for transaction {id}: {validation.banking.errors}",
+            "urgency": "medium"
+          }
+        }
+      ]
+    },
+    {
+      "id": "sanctions_check_failure",
+      "name": "Sanctions Check Failure",
+      "description": "Block transactions that fail sanctions screening",
+      "enabled": true,
+      "priority": "critical",
+      "category": "compliance",
+      "conditions": {
+        "field": "compliance.sanctionsCheck.status",
+        "operator": "equals",
+        "value": "flagged"
+      },
+      "actions": [
+        {
+          "type": "reject_transaction",
+          "config": {
+            "reason": "Transaction blocked due to sanctions screening failure"
+          }
+        },
+        {
+          "type": "send_notification",
+          "config": {
+            "recipient": "compliance@company.com",
+            "message": "URGENT: Sanctions violation detected - Transaction {id}, Flags: {compliance.sanctionsCheck.flags}",
+            "urgency": "critical"
+          }
+        },
+        {
+          "type": "log_event",
+          "config": {
+            "event": "sanctions_violation",
+            "severity": "critical"
+          }
+        }
+      ]
+    },
+    {
+      "id": "high_risk_aml_flags",
+      "name": "High Risk AML Flags",
+      "description": "Enhanced monitoring for transactions with high AML risk",
+      "enabled": true,
+      "priority": "high",
+      "category": "aml",
+      "conditions": {
+        "field": "compliance.amlFlags.riskLevel",
+        "operator": "equals",
+        "value": "high"
+      },
+      "actions": [
+        {
+          "type": "flag_transaction",
+          "config": {
+            "reason": "High AML risk flags detected",
+            "severity": "high"
+          }
+        },
+        {
+          "type": "send_notification",
+          "config": {
+            "recipient": "aml-team@company.com",
+            "message": "High AML risk transaction: {id}, Amount: {transaction.amount}, Flags: {compliance.amlFlags.flags}",
+            "urgency": "high"
+          }
+        }
+      ]
+    },
+    {
+      "id": "large_amount_international",
+      "name": "Large Amount International Transfer",
+      "description": "Enhanced scrutiny for large international transfers",
+      "enabled": true,
+      "priority": "high",
+      "category": "amount_risk",
+      "conditions": {
+        "and": [
+          {
+            "field": "transaction.amount",
+            "operator": "greater_than",
+            "value": 25000
+          },
+          {
+            "field": "from.country",
+            "operator": "not_equals",
+            "value": "{to.country}"
+          }
+        ]
+      },
+      "actions": [
+        {
+          "type": "flag_transaction",
+          "config": {
+            "reason": "Large international transfer requires manual review",
+            "severity": "medium"
+          }
+        },
+        {
+          "type": "calculate_score",
+          "config": {
+            "threshold": 80,
+            "factors": [
+              {
+                "field": "transaction.amount",
+                "weight": 1.2,
+                "ranges": [
+                  { "min": 25000, "max": 100000, "points": 30 },
+                  { "min": 100000, "max": 500000, "points": 60 },
+                  { "min": 500000, "max": 999999999, "points": 85 }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "swift_code_validation",
+      "name": "SWIFT Code Validation",
+      "description": "Validate SWIFT codes for international transfers",
+      "enabled": true,
+      "priority": "medium",
+      "category": "banking_validation",
+      "conditions": {
+        "and": [
+          {
+            "field": "from.country",
+            "operator": "not_equals",
+            "value": "{to.country}"
+          },
+          {
+            "or": [
+              {
+                "field": "from.bank.swiftCode",
+                "operator": "is_empty"
+              },
+              {
+                "field": "to.bank.swiftCode",
+                "operator": "is_empty"
+              }
+            ]
+          }
+        ]
+      },
+      "actions": [
+        {
+          "type": "flag_transaction",
+          "config": {
+            "reason": "Missing SWIFT codes for international transfer",
+            "severity": "medium"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ifsc_code_validation_india",
+      "name": "IFSC Code Validation for India",
+      "description": "Validate IFSC codes for transfers to India",
+      "enabled": true,
+      "priority": "medium",
+      "category": "banking_validation",
+      "conditions": {
+        "and": [
+          {
+            "field": "to.country",
+            "operator": "equals",
+            "value": "IN"
+          },
+          {
+            "field": "to.bank.ifscCode",
+            "operator": "is_empty"
+          }
+        ]
+      },
+      "actions": [
+        {
+          "type": "flag_transaction",
+          "config": {
+            "reason": "Missing IFSC code for transfer to India",
+            "severity": "medium"
+          }
+        }
+      ]
+    },
+    {
+      "id": "currency_mismatch_banking",
+      "name": "Currency Mismatch with Banking Details",
+      "description": "Detect currency mismatches in banking details",
+      "enabled": true,
+      "priority": "low",
+      "category": "currency_validation",
+      "conditions": {
+        "and": [
+          {
+            "field": "transaction.currency",
+            "operator": "not_equals",
+            "value": "{from.account.currency}"
+          },
+          {
+            "field": "transaction.amount",
+            "operator": "greater_than",
+            "value": 5000
+          }
+        ]
+      },
+      "actions": [
+        {
+          "type": "log_event",
+          "config": {
+            "event": "currency_mismatch_detected",
+            "severity": "info"
+          }
+        },
+        {
+          "type": "calculate_score",
+          "config": {
+            "threshold": 15,
+            "factors": [
+              {
+                "field": "transaction.amount",
+                "weight": 0.2,
+                "ranges": [
+                  { "min": 5000, "max": 25000, "points": 5 },
+                  { "min": 25000, "max": 100000, "points": 10 },
+                  { "min": 100000, "max": 999999999, "points": 15 }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "manual_review_required",
+      "name": "Manual Review Required",
+      "description": "Flag transactions that require manual review based on compliance assessment",
+      "enabled": true,
+      "priority": "high",
+      "category": "compliance_review",
+      "conditions": {
+        "field": "compliance.requiresManualReview",
+        "operator": "equals",
+        "value": true
+      },
+      "actions": [
+        {
+          "type": "flag_transaction",
+          "config": {
+            "reason": "Transaction requires manual compliance review",
+            "severity": "high"
+          }
+        },
+        {
+          "type": "send_notification",
+          "config": {
+            "recipient": "compliance@company.com",
+            "message": "Manual review required for transaction {id}: Amount {transaction.amount}, Risk Score: {metadata.riskScore}",
+            "urgency": "medium"
+          }
+        }
+      ]
+    },
+    {
+      "id": "very_high_risk_score",
+      "name": "Very High Risk Score",
+      "description": "Flag transactions with very high calculated risk scores",
+      "enabled": true,
+      "priority": "critical",
+      "category": "risk_assessment",
+      "conditions": {
+        "field": "metadata.riskScore",
+        "operator": "greater_than",
+        "value": 80
+      },
+      "actions": [
+        {
+          "type": "reject_transaction",
+          "config": {
+            "reason": "Transaction blocked due to very high risk score"
+          }
+        },
+        {
+          "type": "send_notification",
+          "config": {
+            "recipient": "risk-team@company.com",
+            "message": "CRITICAL: Very high risk transaction blocked - ID: {id}, Risk Score: {metadata.riskScore}",
+            "urgency": "critical"
+          }
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "version": "2.0",
+    "created": "2024-01-01T00:00:00Z",
+    "description": "Enhanced banking rules with country restrictions, banking validations, and compliance checks",
+    "categories": [
+      "compliance",
+      "geo_risk",
+      "data_validation", 
+      "aml",
+      "amount_risk",
+      "banking_validation",
+      "currency_validation",
+      "compliance_review",
+      "risk_assessment"
+    ],
+    "features": [
+      "Restricted country blocking",
+      "Banking detail validation",
+      "SWIFT/IFSC code validation",
+      "Sanctions screening",
+      "AML risk assessment",
+      "Comprehensive risk scoring",
+      "Multi-currency support"
+    ]
+  }
+} 

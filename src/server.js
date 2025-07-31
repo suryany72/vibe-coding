@@ -129,18 +129,43 @@ class AIRulesValidatorServer {
 
     // Get system statistics
     this.app.get('/api/stats', (req, res) => {
-      const transactionStats = this.transactionMonitor.getStatus();
-      const aiStats = this.aiValidator.getStatistics();
-      
-      res.json({
-        success: true,
-        statistics: {
-          transactions: transactionStats,
-          aiValidation: aiStats,
-          uptime: process.uptime(),
-          memoryUsage: process.memoryUsage()
-        }
-      });
+      try {
+        const transactionStats = this.transactionMonitor.getStatus();
+        const aiStats = this.aiValidator.getStatistics();
+        
+        // Clean stats to avoid circular references
+        const cleanTransactionStats = {
+          isProcessing: transactionStats.isProcessing,
+          queueLength: transactionStats.queueLength,
+          processingQueueLength: transactionStats.processingQueueLength,
+          rulesLoaded: transactionStats.rulesLoaded,
+          metrics: transactionStats.metrics
+        };
+        
+        const cleanAiStats = {
+          totalValidations: aiStats.totalValidations,
+          passedValidations: aiStats.passedValidations,
+          failedValidations: aiStats.failedValidations,
+          successRate: aiStats.successRate,
+          queueLength: aiStats.queueLength,
+          activeValidations: aiStats.activeValidations
+        };
+        
+        res.json({
+          success: true,
+          statistics: {
+            transactions: cleanTransactionStats,
+            aiValidation: cleanAiStats,
+            uptime: process.uptime(),
+            memoryUsage: process.memoryUsage()
+          }
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to retrieve statistics'
+        });
+      }
     });
 
     // Get validation history
@@ -214,19 +239,92 @@ class AIRulesValidatorServer {
       }
     });
 
-    // Process sample transaction endpoint
+    // Process enhanced sample transaction endpoint
     this.app.post('/api/test-transaction', async (req, res) => {
       try {
         const sampleTransaction = {
           id: `test_${Date.now()}`,
           amount: req.body.amount || 5000,
           userId: req.body.userId || 'test_user',
-          type: req.body.type || 'transfer',
-          location: req.body.location || { country: 'US', city: 'New York' },
-          timestamp: new Date().toISOString(),
-          user: {
-            transactionCount24h: req.body.transactionCount24h || 1
+          type: req.body.type || 'international_transfer',
+          currency: req.body.currency || 'USD',
+          purpose: req.body.purpose || 'family_support',
+          urgency: req.body.urgency || 'standard',
+          
+          // Enhanced from (sender) details
+          from: {
+            country: req.body.fromCountry || 'US',
+            bank: {
+              name: req.body.fromBankName || 'Chase Bank',
+              swiftCode: req.body.fromSwiftCode || 'CHASUS33',
+              routingNumber: req.body.fromRoutingNumber || '021000021'
+            },
+            account: {
+              holderName: req.body.fromAccountHolder || 'John Smith',
+              number: req.body.fromAccountNumber || '1234567890123456',
+              type: req.body.fromAccountType || 'checking',
+              currency: req.body.currency || 'USD'
+            },
+            address: {
+              street: req.body.fromStreet || '123 Main Street',
+              city: req.body.fromCity || 'New York',
+              state: req.body.fromState || 'NY',
+              postalCode: req.body.fromPostal || '10001',
+              country: req.body.fromCountry || 'US'
+            }
           },
+          
+          // Enhanced to (recipient) details
+          to: {
+            country: req.body.toCountry || 'IN',
+            bank: {
+              name: req.body.toBankName || 'State Bank of India',
+              swiftCode: req.body.toSwiftCode || 'SBININBB',
+              ifscCode: req.body.toIfscCode || 'SBIN0000001'
+            },
+            account: {
+              holderName: req.body.toAccountHolder || 'Raj Patel',
+              number: req.body.toAccountNumber || '9876543210987654',
+              type: req.body.toAccountType || 'savings',
+              currency: req.body.toCurrency || 'INR'
+            },
+            address: {
+              street: req.body.toStreet || '456 Market Road',
+              city: req.body.toCity || 'Mumbai',
+              state: req.body.toState || 'Maharashtra',
+              postalCode: req.body.toPostal || '400001',
+              country: req.body.toCountry || 'IN'
+            }
+          },
+          
+          // User metadata
+          user: {
+            transactionCount24h: req.body.transactionCount24h || 1,
+            transactionCount1h: req.body.transactionCount1h || 1,
+            totalAmount24h: req.body.totalAmount24h || req.body.amount || 5000,
+            totalAmount1h: req.body.totalAmount1h || req.body.amount || 5000,
+            accountAge: req.body.accountAge || 365,
+            isVIP: req.body.isVIP || false,
+            isBlacklisted: req.body.isBlacklisted || false,
+            defaultCurrency: req.body.userDefaultCurrency || 'USD'
+          },
+          
+          // Device information
+          device: {
+            isRecognized: req.body.deviceRecognized !== false,
+            riskScore: req.body.deviceRiskScore || 20,
+            fingerprint: req.body.deviceFingerprint || `device_${Date.now()}`
+          },
+          
+          // Merchant information (if applicable)
+          merchant: req.body.merchantName ? {
+            name: req.body.merchantName,
+            riskLevel: req.body.merchantRisk || 'low',
+            isBlacklisted: req.body.merchantBlacklisted || false
+          } : null,
+          
+          timestamp: new Date().toISOString(),
+          reference: req.body.reference || `REF${Date.now()}`,
           ...req.body
         };
         
@@ -235,8 +333,16 @@ class AIRulesValidatorServer {
         res.json({
           success: true,
           transactionId,
-          sampleTransaction,
-          message: 'Test transaction processed'
+          message: 'Enhanced test transaction processed with banking details',
+          summary: {
+            amount: sampleTransaction.amount,
+            currency: sampleTransaction.currency,
+            fromCountry: sampleTransaction.from.country,
+            toCountry: sampleTransaction.to.country,
+            fromBank: sampleTransaction.from.bank.name,
+            toBank: sampleTransaction.to.bank.name,
+            purpose: sampleTransaction.purpose
+          }
         });
       } catch (error) {
         res.status(400).json({

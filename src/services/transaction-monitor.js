@@ -1,5 +1,6 @@
 const EventEmitter = require('events');
 const { v4: uuidv4 } = require('uuid');
+const TransactionDetailsModel = require('../models/transaction-details');
 
 class TransactionMonitor extends EventEmitter {
   constructor(ruleProcessor, aiValidator, options = {}) {
@@ -7,6 +8,7 @@ class TransactionMonitor extends EventEmitter {
     
     this.ruleProcessor = ruleProcessor;
     this.aiValidator = aiValidator;
+    this.transactionDetailsModel = new TransactionDetailsModel();
     
     this.config = {
       autoProcessTransactions: options.autoProcessTransactions !== false,
@@ -106,9 +108,25 @@ class TransactionMonitor extends EventEmitter {
   }
 
   /**
-   * Get default rules for demonstration
+   * Get enhanced rules with banking and compliance validations
    */
   async getDefaultRules() {
+    // Try to load enhanced banking rules first
+    try {
+      const fs = require('fs').promises;
+      const path = require('path');
+      const enhancedRulesPath = path.join(process.cwd(), 'rules', 'enhanced-banking-rules.json');
+      const enhancedRulesData = await fs.readFile(enhancedRulesPath, 'utf8');
+      const enhancedRules = JSON.parse(enhancedRulesData);
+      if (enhancedRules.rules && enhancedRules.rules.length > 0) {
+        this.log('info', `Loaded ${enhancedRules.rules.length} enhanced banking rules`);
+        return enhancedRules.rules;
+      }
+    } catch (error) {
+      this.log('warning', `Could not load enhanced rules, falling back to default: ${error.message}`);
+    }
+    
+    // Fallback to original rules with enhanced versions
     return [
       {
         id: 'high_amount_transaction',
@@ -230,10 +248,11 @@ class TransactionMonitor extends EventEmitter {
   }
 
   /**
-   * Validate transaction data structure
+   * Validate transaction data structure with enhanced banking validation
    */
   isValidTransaction(transaction) {
     if (!transaction || typeof transaction !== 'object') {
+      this.log('warning', 'Transaction data is not a valid object');
       return false;
     }
     
@@ -247,34 +266,79 @@ class TransactionMonitor extends EventEmitter {
     }
     
     // Validate amount
-    if (typeof transaction.amount !== 'number' || transaction.amount < 0) {
-      this.log('warning', 'Invalid amount value');
+    if (typeof transaction.amount !== 'number' || transaction.amount <= 0) {
+      this.log('warning', 'Invalid amount value - must be a positive number');
       return false;
+    }
+    
+    // Validate amount limits
+    if (transaction.amount > 1000000) {
+      this.log('warning', 'Amount exceeds maximum limit of $1,000,000');
+      return false;
+    }
+    
+    // Validate currency if provided
+    if (transaction.currency && !this.transactionDetailsModel.currencies[transaction.currency]) {
+      this.log('warning', `Unsupported currency: ${transaction.currency}`);
+      return false;
+    }
+    
+    // Validate country codes if provided
+    if (transaction.from?.country && transaction.from.country.length !== 2) {
+      this.log('warning', 'Invalid from country code format');
+      return false;
+    }
+    
+    if (transaction.to?.country && transaction.to.country.length !== 2) {
+      this.log('warning', 'Invalid to country code format');
+      return false;
+    }
+    
+    // Check for restricted countries
+    const fromCountry = transaction.from?.country;
+    const toCountry = transaction.to?.country;
+    
+    if (fromCountry && this.transactionDetailsModel.restrictedCountries.includes(fromCountry)) {
+      this.log('warning', `Transaction from restricted country: ${fromCountry}`);
+      // Still allow for testing purposes but flag it
+    }
+    
+    if (toCountry && this.transactionDetailsModel.restrictedCountries.includes(toCountry)) {
+      this.log('warning', `Transaction to restricted country: ${toCountry}`);
+      // Still allow for testing purposes but flag it
     }
     
     return true;
   }
 
   /**
-   * Enhance transaction with additional metadata
+   * Enhance transaction with comprehensive banking and compliance details
    */
   enhanceTransaction(transaction) {
     const now = new Date();
     
-    return {
-      ...transaction,
-      id: transaction.id || uuidv4(),
-      timestamp: transaction.timestamp || now.toISOString(),
-      processedAt: null,
-      retryCount: 0,
-      status: 'pending',
-      metadata: {
-        receivedAt: now.toISOString(),
-        source: 'ui',
-        version: '1.0',
-        ...transaction.metadata
-      }
+    // Create enhanced transaction with banking details
+    const enhancedTransaction = this.transactionDetailsModel.createEnhancedTransaction(transaction);
+    
+    // Add processing metadata
+    enhancedTransaction.processedAt = null;
+    enhancedTransaction.retryCount = 0;
+    enhancedTransaction.status = 'pending';
+    enhancedTransaction.metadata = {
+      ...enhancedTransaction.metadata,
+      receivedAt: now.toISOString(),
+      source: 'enhanced_ui',
+      version: '2.0'
     };
+    
+    // Validate banking details
+    const bankingValidation = this.transactionDetailsModel.validateBankingDetails(enhancedTransaction);
+    enhancedTransaction.validation = {
+      banking: bankingValidation,
+      timestamp: now.toISOString()
+    };
+    
+    return enhancedTransaction;
   }
 
   /**
