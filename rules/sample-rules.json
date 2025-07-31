@@ -1,0 +1,484 @@
+{
+  "rules": [
+    {
+      "id": "high_amount_transaction",
+      "name": "High Amount Transaction",
+      "description": "Flag transactions with unusually high amounts",
+      "enabled": true,
+      "priority": "high",
+      "category": "fraud_detection",
+      "conditions": {
+        "field": "amount",
+        "operator": "greater_than",
+        "value": 10000
+      },
+      "actions": [
+        {
+          "type": "flag_transaction",
+          "config": {
+            "reason": "High amount transaction requires manual review",
+            "severity": "medium"
+          }
+        },
+        {
+          "type": "calculate_score",
+          "config": {
+            "threshold": 80,
+            "factors": [
+              {
+                "field": "amount",
+                "weight": 1,
+                "ranges": [
+                  { "min": 10000, "max": 50000, "points": 30 },
+                  { "min": 50000, "max": 100000, "points": 60 },
+                  { "min": 100000, "max": 500000, "points": 80 },
+                  { "min": 500000, "max": 999999999, "points": 95 }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "send_notification",
+          "config": {
+            "recipient": "fraud-team@company.com",
+            "message": "High amount transaction detected: ${amount} for user ${userId}",
+            "urgency": "medium"
+          }
+        }
+      ]
+    },
+    {
+      "id": "suspicious_location",
+      "name": "Suspicious Location Transaction",
+      "description": "Detect transactions from high-risk or unknown locations",
+      "enabled": true,
+      "priority": "high",
+      "category": "geo_risk",
+      "conditions": {
+        "and": [
+          {
+            "field": "location.country",
+            "operator": "in",
+            "value": ["Unknown", "Restricted", "High-Risk"]
+          },
+          {
+            "field": "amount",
+            "operator": "greater_than",
+            "value": 1000
+          }
+        ]
+      },
+      "actions": [
+        {
+          "type": "flag_transaction",
+          "config": {
+            "reason": "Transaction from suspicious location",
+            "severity": "high"
+          }
+        },
+        {
+          "type": "send_notification",
+          "config": {
+            "recipient": "security@company.com",
+            "message": "Suspicious transaction detected from {location.country} for amount ${amount}",
+            "urgency": "high"
+          }
+        },
+        {
+          "type": "reject_transaction",
+          "config": {
+            "reason": "Transaction blocked due to high-risk location"
+          }
+        }
+      ]
+    },
+    {
+      "id": "frequent_transactions",
+      "name": "Frequent Transaction Pattern",
+      "description": "Monitor users with unusually high transaction frequency",
+      "enabled": true,
+      "priority": "medium",
+      "category": "behavior_analysis",
+      "conditions": {
+        "field": "user.transactionCount24h",
+        "operator": "greater_than",
+        "value": 20
+      },
+      "actions": [
+        {
+          "type": "log_event",
+          "config": {
+            "event": "frequent_transactions_detected",
+            "severity": "info"
+          }
+        },
+        {
+          "type": "calculate_score",
+          "config": {
+            "threshold": 60,
+            "factors": [
+              {
+                "field": "user.transactionCount24h",
+                "weight": 1,
+                "ranges": [
+                  { "min": 20, "max": 50, "points": 20 },
+                  { "min": 50, "max": 100, "points": 40 },
+                  { "min": 100, "max": 999, "points": 70 }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "off_hours_transaction",
+      "name": "Off-Hours Transaction",
+      "description": "Flag transactions occurring outside normal business hours",
+      "enabled": true,
+      "priority": "low",
+      "category": "temporal_analysis",
+      "conditions": {
+        "or": [
+          {
+            "field": "hour",
+            "operator": "less_than",
+            "value": 6
+          },
+          {
+            "field": "hour",
+            "operator": "greater_than",
+            "value": 22
+          }
+        ]
+      },
+      "actions": [
+        {
+          "type": "log_event",
+          "config": {
+            "event": "off_hours_transaction",
+            "severity": "info"
+          }
+        },
+        {
+          "type": "calculate_score",
+          "config": {
+            "threshold": 30,
+            "factors": [
+              {
+                "field": "hour",
+                "weight": 0.5,
+                "ranges": [
+                  { "min": 0, "max": 3, "points": 25 },
+                  { "min": 3, "max": 6, "points": 15 },
+                  { "min": 23, "max": 24, "points": 20 }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "new_user_high_amount",
+      "name": "New User High Amount",
+      "description": "Monitor high-value transactions from recently registered users",
+      "enabled": true,
+      "priority": "high",
+      "category": "user_risk",
+      "conditions": {
+        "and": [
+          {
+            "field": "user.accountAge",
+            "operator": "less_than",
+            "value": 30
+          },
+          {
+            "field": "amount",
+            "operator": "greater_than",
+            "value": 5000
+          }
+        ]
+      },
+      "actions": [
+        {
+          "type": "flag_transaction",
+          "config": {
+            "reason": "High amount transaction from new user account",
+            "severity": "high"
+          }
+        },
+        {
+          "type": "send_notification",
+          "config": {
+            "recipient": "kyc-team@company.com",
+            "message": "New user ${userId} (${user.accountAge} days old) attempting ${amount} transaction",
+            "urgency": "high"
+          }
+        }
+      ]
+    },
+    {
+      "id": "velocity_check",
+      "name": "Transaction Velocity Check",
+      "description": "Monitor rapid succession of transactions",
+      "enabled": true,
+      "priority": "medium",
+      "category": "velocity",
+      "conditions": {
+        "and": [
+          {
+            "field": "user.transactionCount1h",
+            "operator": "greater_than",
+            "value": 5
+          },
+          {
+            "field": "user.totalAmount1h",
+            "operator": "greater_than",
+            "value": 25000
+          }
+        ]
+      },
+      "actions": [
+        {
+          "type": "flag_transaction",
+          "config": {
+            "reason": "High velocity transactions detected",
+            "severity": "medium"
+          }
+        },
+        {
+          "type": "calculate_score",
+          "config": {
+            "threshold": 70,
+            "factors": [
+              {
+                "field": "user.transactionCount1h",
+                "weight": 1,
+                "ranges": [
+                  { "min": 5, "max": 10, "points": 30 },
+                  { "min": 10, "max": 20, "points": 60 },
+                  { "min": 20, "max": 999, "points": 90 }
+                ]
+              },
+              {
+                "field": "user.totalAmount1h",
+                "weight": 0.8,
+                "ranges": [
+                  { "min": 25000, "max": 100000, "points": 25 },
+                  { "min": 100000, "max": 500000, "points": 50 },
+                  { "min": 500000, "max": 999999999, "points": 75 }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "merchant_risk",
+      "name": "High-Risk Merchant",
+      "description": "Flag transactions to merchants with elevated risk profiles",
+      "enabled": true,
+      "priority": "high",
+      "category": "merchant_risk",
+      "conditions": {
+        "and": [
+          {
+            "field": "merchant.riskLevel",
+            "operator": "equals",
+            "value": "high"
+          },
+          {
+            "field": "amount",
+            "operator": "greater_than",
+            "value": 1000
+          }
+        ]
+      },
+      "actions": [
+        {
+          "type": "flag_transaction",
+          "config": {
+            "reason": "Transaction to high-risk merchant",
+            "severity": "high"
+          }
+        },
+        {
+          "type": "send_notification",
+          "config": {
+            "recipient": "compliance@company.com",
+            "message": "Transaction of ${amount} to high-risk merchant ${merchant.name}",
+            "urgency": "medium"
+          }
+        }
+      ]
+    },
+    {
+      "id": "currency_mismatch",
+      "name": "Currency Mismatch",
+      "description": "Detect transactions with unexpected currency conversions",
+      "enabled": true,
+      "priority": "low",
+      "category": "currency_risk",
+      "conditions": {
+        "and": [
+          {
+            "field": "currency",
+            "operator": "not_equals",
+            "value": "USD"
+          },
+          {
+            "field": "user.defaultCurrency",
+            "operator": "equals",
+            "value": "USD"
+          },
+          {
+            "field": "amount",
+            "operator": "greater_than",
+            "value": 2000
+          }
+        ]
+      },
+      "actions": [
+        {
+          "type": "log_event",
+          "config": {
+            "event": "currency_mismatch_detected",
+            "severity": "info"
+          }
+        },
+        {
+          "type": "calculate_score",
+          "config": {
+            "threshold": 20,
+            "factors": [
+              {
+                "field": "amount",
+                "weight": 0.3,
+                "ranges": [
+                  { "min": 2000, "max": 10000, "points": 10 },
+                  { "min": 10000, "max": 50000, "points": 20 },
+                  { "min": 50000, "max": 999999999, "points": 35 }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "blacklist_check",
+      "name": "Blacklist Check",
+      "description": "Check transactions against known blacklisted entities",
+      "enabled": true,
+      "priority": "critical",
+      "category": "compliance",
+      "conditions": {
+        "or": [
+          {
+            "field": "user.isBlacklisted",
+            "operator": "equals",
+            "value": true
+          },
+          {
+            "field": "merchant.isBlacklisted",
+            "operator": "equals",
+            "value": true
+          },
+          {
+            "field": "location.country",
+            "operator": "in",
+            "value": ["SANCTIONED_COUNTRY_1", "SANCTIONED_COUNTRY_2"]
+          }
+        ]
+      },
+      "actions": [
+        {
+          "type": "reject_transaction",
+          "config": {
+            "reason": "Transaction involves blacklisted entity or sanctioned location"
+          }
+        },
+        {
+          "type": "send_notification",
+          "config": {
+            "recipient": "compliance@company.com",
+            "message": "URGENT: Blacklist violation detected for transaction ${id}",
+            "urgency": "critical"
+          }
+        },
+        {
+          "type": "log_event",
+          "config": {
+            "event": "blacklist_violation",
+            "severity": "critical"
+          }
+        }
+      ]
+    },
+    {
+      "id": "device_fingerprint",
+      "name": "Suspicious Device",
+      "description": "Flag transactions from unrecognized or suspicious devices",
+      "enabled": true,
+      "priority": "medium",
+      "category": "device_risk",
+      "conditions": {
+        "and": [
+          {
+            "field": "device.isRecognized",
+            "operator": "equals",
+            "value": false
+          },
+          {
+            "field": "device.riskScore",
+            "operator": "greater_than",
+            "value": 70
+          }
+        ]
+      },
+      "actions": [
+        {
+          "type": "flag_transaction",
+          "config": {
+            "reason": "Transaction from unrecognized high-risk device",
+            "severity": "medium"
+          }
+        },
+        {
+          "type": "send_notification",
+          "config": {
+            "recipient": "security@company.com",
+            "message": "Suspicious device transaction: User ${userId}, Device Risk: ${device.riskScore}",
+            "urgency": "medium"
+          }
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "version": "1.0",
+    "created": "2024-01-01T00:00:00Z",
+    "description": "Comprehensive rule set for AI-powered transaction monitoring and validation",
+    "categories": [
+      "fraud_detection",
+      "geo_risk", 
+      "behavior_analysis",
+      "temporal_analysis",
+      "user_risk",
+      "velocity",
+      "merchant_risk",
+      "currency_risk",
+      "compliance",
+      "device_risk"
+    ],
+    "priorities": [
+      "critical",
+      "high", 
+      "medium",
+      "low"
+    ]
+  }
+} 
