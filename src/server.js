@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const cookieParser = require('cookie-parser');
 const path = require('path');
 const WebSocket = require('ws');
 const http = require('http');
@@ -8,6 +9,8 @@ const http = require('http');
 const RuleProcessor = require('./rules-engine/rule-processor');
 const AIValidationAgent = require('./agents/ai-validator');
 const TransactionMonitor = require('./services/transaction-monitor');
+const UserManagement = require('./models/user-management');
+const AuthMiddleware = require('./middleware/auth');
 
 class AIRulesValidatorServer {
   constructor(options = {}) {
@@ -33,6 +36,10 @@ class AIRulesValidatorServer {
       { enableRealTimeProcessing: true }
     );
     
+    // Initialize authentication
+    this.userManagement = new UserManagement();
+    this.authMiddleware = new AuthMiddleware();
+    
     // Initialize Express app
     this.app = express();
     this.server = http.createServer(this.app);
@@ -55,12 +62,19 @@ class AIRulesValidatorServer {
   setupMiddleware() {
     // Enable CORS if configured
     if (this.config.enableCors) {
-      this.app.use(cors());
+      this.app.use(cors({
+        origin: true,
+        credentials: true
+      }));
     }
     
     // Body parsing middleware
     this.app.use(bodyParser.json({ limit: '10mb' }));
     this.app.use(bodyParser.urlencoded({ extended: true }));
+    this.app.use(cookieParser());
+    
+    // Make user management available to middleware
+    this.app.locals.userManagement = this.userManagement;
     
     // Logging middleware
     this.app.use((req, res, next) => {
@@ -77,6 +91,9 @@ class AIRulesValidatorServer {
    * Setup API routes
    */
   setupRoutes() {
+    // Authentication routes
+    this.setupAuthRoutes();
+    
     // Health check endpoint
     this.app.get('/api/health', (req, res) => {
       res.json({
@@ -89,24 +106,31 @@ class AIRulesValidatorServer {
       });
     });
 
-    // Transaction processing endpoint
-    this.app.post('/api/transactions', async (req, res) => {
-      try {
-        const transaction = req.body;
-        const transactionId = this.transactionMonitor.monitorTransaction(transaction);
-        
-        res.json({
-          success: true,
-          transactionId,
-          message: 'Transaction queued for processing'
-        });
-      } catch (error) {
-        res.status(400).json({
-          success: false,
-          error: error.message
-        });
-      }
-    });
+    // Transaction processing endpoint (requires authentication)
+    this.app.post('/api/transactions', 
+      this.authMiddleware.verifyToken,
+      this.authMiddleware.requirePermission('create_transaction'),
+      async (req, res) => {
+        try {
+          const transaction = {
+            ...req.body,
+            userId: req.user.id, // Associate with authenticated user
+            createdBy: req.user.username
+          };
+          const transactionId = this.transactionMonitor.monitorTransaction(transaction);
+          
+          res.json({
+            success: true,
+            transactionId,
+            message: 'Transaction queued for processing'
+          });
+        } catch (error) {
+          res.status(400).json({
+            success: false,
+            error: error.message
+          });
+        }
+      });
 
     // Get transaction status
     this.app.get('/api/transactions/:id', (req, res) => {
@@ -127,46 +151,63 @@ class AIRulesValidatorServer {
       });
     });
 
-    // Get system statistics
-    this.app.get('/api/stats', (req, res) => {
-      try {
-        const transactionStats = this.transactionMonitor.getStatus();
-        const aiStats = this.aiValidator.getStatistics();
-        
-        // Clean stats to avoid circular references
-        const cleanTransactionStats = {
-          isProcessing: transactionStats.isProcessing,
-          queueLength: transactionStats.queueLength,
-          processingQueueLength: transactionStats.processingQueueLength,
-          rulesLoaded: transactionStats.rulesLoaded,
-          metrics: transactionStats.metrics
-        };
-        
-        const cleanAiStats = {
-          totalValidations: aiStats.totalValidations,
-          passedValidations: aiStats.passedValidations,
-          failedValidations: aiStats.failedValidations,
-          successRate: aiStats.successRate,
-          queueLength: aiStats.queueLength,
-          activeValidations: aiStats.activeValidations
-        };
-        
-        res.json({
-          success: true,
-          statistics: {
-            transactions: cleanTransactionStats,
-            aiValidation: cleanAiStats,
-            uptime: process.uptime(),
-            memoryUsage: process.memoryUsage()
+    // Get system statistics (role-based access)
+    this.app.get('/api/stats', 
+      this.authMiddleware.optionalAuth,
+      (req, res) => {
+        try {
+          const transactionStats = this.transactionMonitor.getStatus();
+          const aiStats = this.aiValidator.getStatistics();
+          
+          // Clean stats to avoid circular references
+          const cleanTransactionStats = {
+            isProcessing: transactionStats.isProcessing,
+            queueLength: transactionStats.queueLength,
+            processingQueueLength: transactionStats.processingQueueLength,
+            rulesLoaded: transactionStats.rulesLoaded,
+            metrics: transactionStats.metrics
+          };
+          
+          const cleanAiStats = {
+            totalValidations: aiStats.totalValidations,
+            passedValidations: aiStats.passedValidations,
+            failedValidations: aiStats.failedValidations,
+            successRate: aiStats.successRate,
+            queueLength: aiStats.queueLength,
+            activeValidations: aiStats.activeValidations
+          };
+          
+          let responseData = {
+            success: true,
+            statistics: {
+              uptime: process.uptime(),
+              memoryUsage: process.memoryUsage()
+            }
+          };
+          
+          // Role-based data filtering
+          if (req.user) {
+            if (this.userManagement.hasPermission(req.user.role, 'view_system_stats')) {
+              responseData.statistics.transactions = cleanTransactionStats;
+              responseData.statistics.aiValidation = cleanAiStats;
+            }
+            
+            responseData.user = {
+              role: req.user.role,
+              roleName: req.user.roleName,
+              permissions: req.user.permissions,
+              uiComponents: req.user.uiComponents
+            };
           }
-        });
-      } catch (error) {
-        res.status(500).json({
-          success: false,
-          error: 'Failed to retrieve statistics'
-        });
-      }
-    });
+          
+          res.json(responseData);
+        } catch (error) {
+          res.status(500).json({
+            success: false,
+            error: 'Failed to retrieve statistics'
+          });
+        }
+      });
 
     // Get validation history
     this.app.get('/api/validations', (req, res) => {
@@ -239,8 +280,11 @@ class AIRulesValidatorServer {
       }
     });
 
-    // Process enhanced sample transaction endpoint
-    this.app.post('/api/test-transaction', async (req, res) => {
+    // Process enhanced sample transaction endpoint (testers and super admins only)
+    this.app.post('/api/test-transaction',
+      this.authMiddleware.verifyToken,
+      this.authMiddleware.requirePermission('create_test_transaction'),
+      async (req, res) => {
       try {
         const sampleTransaction = {
           id: `test_${Date.now()}`,
@@ -360,10 +404,132 @@ class AIRulesValidatorServer {
       });
     });
 
-    // Root endpoint - serve the UI
+    // Root endpoint - serve the role-based UI
     this.app.get('/', (req, res) => {
+      res.sendFile(path.join(this.config.staticPath, 'role-based-dashboard.html'));
+    });
+
+    // Legacy UI endpoint
+    this.app.get('/legacy', (req, res) => {
       res.sendFile(path.join(this.config.staticPath, 'index.html'));
     });
+  }
+
+  /**
+   * Setup authentication routes
+   */
+  setupAuthRoutes() {
+    // Login endpoint
+    this.app.post('/api/auth/login', async (req, res) => {
+      try {
+        const { username, password } = req.body;
+        
+        if (!username || !password) {
+          return res.status(400).json({
+            success: false,
+            error: 'Username and password are required'
+          });
+        }
+        
+        const authResult = await this.userManagement.authenticateUser(username, password);
+        
+        // Set HTTP-only cookie for security
+        res.cookie('token', authResult.token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          maxAge: 24 * 60 * 60 * 1000 // 24 hours
+        });
+        
+        res.json({
+          success: true,
+          user: authResult.user,
+          token: authResult.token,
+          message: `Welcome ${authResult.user.firstName}! Logged in as ${authResult.user.roleName}`
+        });
+      } catch (error) {
+        res.status(401).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // Logout endpoint
+    this.app.post('/api/auth/logout', (req, res) => {
+      res.clearCookie('token');
+      res.json({
+        success: true,
+        message: 'Logged out successfully'
+      });
+    });
+
+    // Get current user info
+    this.app.get('/api/auth/me', 
+      this.authMiddleware.verifyToken,
+      (req, res) => {
+        res.json({
+          success: true,
+          user: req.user
+        });
+      });
+
+    // Get user roles and permissions (for UI configuration)
+    this.app.get('/api/auth/roles', (req, res) => {
+      res.json({
+        success: true,
+        roles: this.userManagement.getAllRoles()
+      });
+    });
+
+    // User management routes (admin only)
+    this.app.get('/api/users',
+      this.authMiddleware.verifyToken,
+      this.authMiddleware.requirePermission('manage_users'),
+      (req, res) => {
+        const users = this.userManagement.getAllUsers();
+        res.json({
+          success: true,
+          users
+        });
+      });
+
+    this.app.post('/api/users',
+      this.authMiddleware.verifyToken,
+      this.authMiddleware.requirePermission('manage_users'),
+      async (req, res) => {
+        try {
+          const newUser = await this.userManagement.createUser(req.body);
+          res.json({
+            success: true,
+            user: newUser,
+            message: 'User created successfully'
+          });
+        } catch (error) {
+          res.status(400).json({
+            success: false,
+            error: error.message
+          });
+        }
+      });
+
+    this.app.put('/api/users/:username',
+      this.authMiddleware.verifyToken,
+      this.authMiddleware.requirePermission('manage_users'),
+      (req, res) => {
+        try {
+          const updatedUser = this.userManagement.updateUser(req.params.username, req.body);
+          res.json({
+            success: true,
+            user: updatedUser,
+            message: 'User updated successfully'
+          });
+        } catch (error) {
+          res.status(400).json({
+            success: false,
+            error: error.message
+          });
+        }
+      });
   }
 
   /**
